@@ -7,7 +7,7 @@ categories: [网络]
 
 # IP和ASN分配机构层级结构
 
-```mermaid
+<div class="mermaid">
 graph TD
     IANA[IANA<br>互联网号码分配机构] --> RIRs[区域互联网注册管理机构 RIRs]
     
@@ -27,7 +27,7 @@ graph TD
     
     classDef org fill:#f9f,stroke:#333,stroke-width:2px;
     class IANA,RIRs,ARIN,RIPE,APNIC,LACNIC,AFRINIC org;
-```
+</div>
 
 ## 说明
 
