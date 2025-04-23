@@ -50,12 +50,7 @@ udp   737280   0  *.*.*.*:xxxxx    0.0.0.0:*    <pid>/process_name
     - 硬件中断处理
     - 禁用网卡中断
     - 调度 NAPI 轮询
-    |
-    ↓
-NAPI 层：
-    - 软中断处理
-    - 轮询网卡接收队列
-    - 将数据包传递给网络层
+    - 在软中断上下文中处理数据包
     |
     ↓
 网络层（IP层）：
@@ -85,19 +80,16 @@ NAPI 层：
 2. 驱动层处理：
    - 中断处理函数禁用网卡中断，避免频繁中断
    - 调度 NAPI 轮询机制
+   - 在软中断上下文中处理数据包
    - 将数据包从接收环移动到内核内存中
-
-3. NAPI 处理：
-   - 在软中断上下文中执行
-   - 轮询网卡接收队列，处理所有待处理的数据包
    - 将数据包传递给网络层处理
 
-4. 网络层处理：
+3. 网络层处理：
    - 分配 sk_buff 结构，用于管理数据包
    - 进行 IP 包的校验和重组
    - 根据目标 IP 和端口查找对应的 socket
 
-5. 传输层处理：
+4. 传输层处理：
    - TCP：
      - 检查序列号，确保数据包按序到达
      - 将数据包放入接收队列
@@ -106,7 +98,7 @@ NAPI 层：
      - 校验和检查
      - 直接将数据包放入接收队列
 
-6. 应用层处理：
+5. 应用层处理：
    - 应用程序通过系统调用读取数据
    - 内核将数据从 socket 接收队列拷贝到用户空间
    - 释放 sk_buff 结构
@@ -300,47 +292,114 @@ int udp_ioctl(struct sock *sk, int cmd, unsigned long arg)
 
 #### 8.2 SO_MEMINFO 的实现对比
 
-SO_MEMINFO 的实现（简化版）：
+SO_MEMINFO 的真实源码实现（Linux 5.15）：
+
 ```c
-static int sock_getsockopt(struct socket *sock, int level, int optname,
-                          char __user *optval, int __user *optlen)
+// include/uapi/linux/sock_diag.h
+enum {
+    SK_MEMINFO_RMEM_ALLOC,    // 接收队列已分配内存
+    SK_MEMINFO_RCVBUF,        // 接收缓冲区大小
+    SK_MEMINFO_WMEM_ALLOC,    // 发送队列已分配内存
+    SK_MEMINFO_SNDBUF,        // 发送缓冲区大小
+    SK_MEMINFO_FWD_ALLOC,     // 预分配内存
+    SK_MEMINFO_WMEM_QUEUED,   // 发送队列中等待发送的数据量
+    SK_MEMINFO_OPTMEM,        // 其他内存使用量
+    SK_MEMINFO_BACKLOG,       // 积压队列长度
+    SK_MEMINFO_DROPS,         // 丢弃的数据包数量
+
+    SK_MEMINFO_VARS,          // 统计项总数
+};
+
+// net/core/sock.c
+static inline int sk_rmem_alloc_get(const struct sock *sk)
+{
+    return atomic_read(&sk->sk_rmem_alloc);
+}
+
+static inline int sk_wmem_alloc_get(const struct sock *sk)
+{
+    return atomic_read(&sk->sk_wmem_alloc);
+}
+
+void sk_get_meminfo(const struct sock *sk, u32 *mem)
+{
+    memset(mem, 0, sizeof(*mem) * SK_MEMINFO_VARS);
+
+    mem[SK_MEMINFO_RMEM_ALLOC] = sk_rmem_alloc_get(sk);
+    mem[SK_MEMINFO_RCVBUF] = READ_ONCE(sk->sk_rcvbuf);
+    mem[SK_MEMINFO_WMEM_ALLOC] = sk_wmem_alloc_get(sk);
+    mem[SK_MEMINFO_SNDBUF] = READ_ONCE(sk->sk_sndbuf);
+    mem[SK_MEMINFO_FWD_ALLOC] = sk->sk_forward_alloc;
+    mem[SK_MEMINFO_WMEM_QUEUED] = READ_ONCE(sk->sk_wmem_queued);
+    mem[SK_MEMINFO_OPTMEM] = atomic_read(&sk->sk_omem_alloc);
+    mem[SK_MEMINFO_BACKLOG] = READ_ONCE(sk->sk_backlog.len);
+    mem[SK_MEMINFO_DROPS] = atomic_read(&sk->sk_drops);
+}
+
+int sock_getsockopt(struct socket *sock, int level, int optname,
+                    char __user *optval, int __user *optlen)
 {
     struct sock *sk = sock->sk;
-    struct sk_meminfo meminfo;
+    // ... 其他代码 ...
 
     switch (optname) {
     case SO_MEMINFO:
-        if (sk->sk_type == SOCK_STREAM) {
-            // TCP 的情况
-            meminfo[SK_MEMINFO_RMEM_ALLOC] = sk->sk_rmem_alloc;
-            meminfo[SK_MEMINFO_WMEM_ALLOC] = sk->sk_wmem_alloc;
-            meminfo[SK_MEMINFO_RMEM_MAX] = sk->sk_rcvbuf;
-            meminfo[SK_MEMINFO_WMEM_MAX] = sk->sk_sndbuf;
-            // 还包括其他内存统计信息
-        } else {
-            // UDP 的情况
-            meminfo[SK_MEMINFO_RMEM_ALLOC] = sk->sk_rmem_alloc;
-            meminfo[SK_MEMINFO_WMEM_ALLOC] = sk->sk_wmem_alloc;
-            meminfo[SK_MEMINFO_RMEM_MAX] = sk->sk_rcvbuf;
-            meminfo[SK_MEMINFO_WMEM_MAX] = sk->sk_sndbuf;
-        }
-        return copy_to_user(optval, &meminfo, sizeof(meminfo));
+    {
+        u32 meminfo[SK_MEMINFO_VARS];
+
+        sk_get_meminfo(sk, meminfo);
+
+        len = min_t(unsigned int, len, sizeof(meminfo));
+        if (copy_to_user(optval, &meminfo, len))
+            return -EFAULT;
+
+        goto lenout;
     }
-    // ...
+    // ... 其他 case
+    }
+    // ... 其他代码 ...
 }
 ```
 
 从源码可以看出：
-1. TCP Socket：
-   - `SK_MEMINFO_RMEM_ALLOC` 只包含接收队列中已确认和排序的数据包内存占用
-   - `SK_MEMINFO_WMEM_ALLOC` 包含发送队列中所有数据包的内存占用
-   - 正在进行重组的数据包内存和预接收队列的内存占用是通过其他机制管理的
-   - 这些额外的内存统计信息可能在其他字段中，而不是在 `sk_rmem_alloc` 中
+1. SO_MEMINFO 提供了 9 个不同的内存统计项：
+   - `SK_MEMINFO_RMEM_ALLOC`：接收队列已分配的内存
+   - `SK_MEMINFO_RCVBUF`：接收缓冲区大小
+   - `SK_MEMINFO_WMEM_ALLOC`：发送队列已分配的内存
+   - `SK_MEMINFO_SNDBUF`：发送缓冲区大小
+   - `SK_MEMINFO_FWD_ALLOC`：预分配的内存
+   - `SK_MEMINFO_WMEM_QUEUED`：发送队列中等待发送的数据量
+   - `SK_MEMINFO_OPTMEM`：其他内存使用量
+   - `SK_MEMINFO_BACKLOG`：积压队列长度
+   - `SK_MEMINFO_DROPS`：丢弃的数据包数量
 
-2. UDP Socket：
-   - `SK_MEMINFO_RMEM_ALLOC` 只包含接收队列中所有数据包的内存占用
-   - `SK_MEMINFO_WMEM_ALLOC` 只包含发送队列中所有数据包的内存占用
-   - 由于 UDP 没有连接状态和重传机制，所以内存统计更简单
+2. 实现特点：
+   - 使用 `sk_get_meminfo()` 函数获取所有统计项
+   - 使用 `READ_ONCE()` 和 `atomic_read()` 确保线程安全
+   - 通过 `copy_to_user()` 将数据拷贝到用户空间
+   - 支持部分数据拷贝（通过 `min_t()` 限制拷贝长度）
+
+3. TCP 和 UDP Socket 的区别：
+   - TCP Socket：
+     - `SK_MEMINFO_BACKLOG` 表示未完成三次握手的连接队列长度
+     - `SK_MEMINFO_WMEM_QUEUED` 包含重传队列中的数据量
+     - `SK_MEMINFO_DROPS` 可能包含因拥塞控制而丢弃的数据包
+     - `SK_MEMINFO_OPTMEM` 包含 TCP 选项和状态信息占用的内存
+   - UDP Socket：
+     - `SK_MEMINFO_BACKLOG` 始终为 0（UDP 无连接状态）
+     - `SK_MEMINFO_WMEM_QUEUED` 只包含发送队列中的数据量
+     - `SK_MEMINFO_DROPS` 仅统计因接收缓冲区满而丢弃的数据包
+       - 校验和错误的数据包在进入接收队列前就被丢弃
+       - 这种丢弃不会反映在 `SK_MEMINFO_DROPS` 中
+     - `SK_MEMINFO_OPTMEM` 通常为 0（UDP 无复杂状态）
+
+4. 使用注意事项：
+   - 返回的是 u32 数组，每个元素对应一个统计项
+   - 数组大小固定为 `SK_MEMINFO_VARS`（9个元素）
+   - 用户空间需要正确解析数组内容
+   - 部分统计项可能因协议类型不同而含义不同
+   - 在解析统计项时需要考虑协议类型
+   - 某些统计项在特定协议下可能没有实际意义
 
 #### 8.3 接口含义的差异
 
@@ -367,22 +426,24 @@ static int sock_getsockopt(struct socket *sock, int level, int optname,
 在 libevent 2.1.12 版本中，查询 socket 可读数据量的函数是 `get_n_bytes_readable_on_socket`，其实现如下：
 
 ```c
+#define EVBUFFER_MAX_READ 4096  // 默认最大读取大小，选择 4096 是因为这是典型的页面大小
+
 static int
 get_n_bytes_readable_on_socket(evutil_socket_t fd)
 {
 #if defined(FIONREAD) && defined(_WIN32)
-	unsigned long lng = EVBUFFER_MAX_READ;
-	if (ioctlsocket(fd, FIONREAD, &lng) < 0)
-		return -1;
-	/* Can overflow, but mostly harmlessly. XXXX */
-	return (int)lng;
+    unsigned long lng = EVBUFFER_MAX_READ;
+    if (ioctlsocket(fd, FIONREAD, &lng) < 0)
+        return -1;
+    /* Can overflow, but mostly harmlessly. XXXX */
+    return (int)lng;
 #elif defined(FIONREAD)
-	int n = EVBUFFER_MAX_READ;
-	if (ioctl(fd, FIONREAD, &n) < 0)
-		return -1;
-	return n;
+    int n = EVBUFFER_MAX_READ;
+    if (ioctl(fd, FIONREAD, &n) < 0)
+        return -1;
+    return n;
 #else
-	return EVBUFFER_MAX_READ;
+    return EVBUFFER_MAX_READ;
 #endif
 }
 ```
@@ -390,7 +451,7 @@ get_n_bytes_readable_on_socket(evutil_socket_t fd)
 这个函数的主要特点：
 1. 在 Windows 平台使用 `ioctlsocket` 调用 `FIONREAD`
 2. 在 Unix/Linux 平台使用 `ioctl` 调用 `FIONREAD`
-3. 如果平台不支持 `FIONREAD`，则返回 `EVBUFFER_MAX_READ`（一个预定义的最大值）
+3. 如果平台不支持 `FIONREAD`，则返回 `EVBUFFER_MAX_READ`（默认值为 4096 字节）
 4. 函数返回 -1 表示获取可读数据量失败
 
 这个函数在 libevent 中的主要用途：
