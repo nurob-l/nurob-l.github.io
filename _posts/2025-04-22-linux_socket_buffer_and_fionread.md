@@ -16,6 +16,7 @@ categories: [网络, Linux]
 ## 问题分析
 
 通过 `ls -l /proc/<pid>/fd/<fd>` 查看文件描述符信息：
+
 ```bash
 ls -l /proc/<pid>/fd/33
 lrwx------ 1 root root 64 Apr 22 06:44 /proc/<pid>/fd/33 -> 'socket:[xxxxxxxx]'
@@ -29,6 +30,7 @@ lrwx------ 1 root root 64 Apr 22 06:44 /proc/<pid>/fd/33 -> 'socket:[xxxxxxxx]'
 - `xxxxxxxx` 是 socket 的 inode 号
 
 通过 netstat 命令可以看到这个 socket 的更多信息：
+
 ```bash
 netstat -nap | grep <pid>
 udp   737280   0  *.*.*.*:xxxxx    0.0.0.0:*    <pid>/process_name
@@ -464,6 +466,7 @@ get_n_bytes_readable_on_socket(evutil_socket_t fd)
 ## 问题排查方法
 
 1. 检查 UDP 统计信息：
+
 ```bash
 # 查看 UDP 统计
 netstat -us
@@ -472,12 +475,14 @@ cat /proc/net/snmp
 ```
 
 2. 使用 tcpdump 抓包分析：
+
 ```bash
 # 抓取指定端口的 UDP 包
 tcpdump -i any udp port xxxxx -w dump.pcap
 ```
 
 3. 检查系统参数：
+
 ```bash
 # 查看接收缓冲区大小
 sysctl net.core.rmem_max
@@ -488,6 +493,7 @@ sysctl net.ipv4.udp_mem
 ```
 
 4. 在代码中添加更多诊断信息：
+
 ```c
 // 获取实际的接收缓冲区大小
 int rcvbuf;
@@ -511,6 +517,7 @@ if (error != 0) {
 ```
 
 5. 使用 strace 工具分析系统调用：
+
 ```bash
 # 追踪系统调用
 strace -p <pid>
