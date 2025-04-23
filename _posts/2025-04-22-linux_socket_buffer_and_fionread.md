@@ -166,6 +166,34 @@ getsockopt(fd_, SOL_SOCKET, SO_MEMINFO, &meminfo, &optlen);
 // 这个值与 netstat 显示的 Recv-Q 值是一致的
 ```
 
+需要注意的是，SO_MEMINFO 接口存在以下风险：
+
+1. 接口稳定性风险：
+   - SO_MEMINFO 不是标准的 POSIX 接口
+   - 在 Linux 内核文档和手册页中鲜有提及
+   - SK_MEMINFO_RMEM_ALLOC 等常量定义在 net/diag 相关文件中
+   - 这些接口可能在未来内核版本中发生变化或移除
+
+2. 兼容性风险：
+   - 不同 Linux 内核版本可能实现不同
+   - 其他 Unix 系统可能不支持此接口
+   - 跨平台应用需要额外的兼容性处理
+
+3. 使用建议：
+   - 仅用于调试和监控目的
+   - 不建议在生产环境中依赖此接口
+   - 如果必须使用，建议：
+     - 添加版本检查
+     - 提供降级方案
+     - 做好错误处理
+     - 考虑使用 netlink 接口作为替代
+
+4. 替代方案：
+   - 使用 netlink 接口获取 socket 统计信息
+   - 通过 /proc/net/udp 文件系统获取信息
+   - 使用 netstat 等工具的输出
+   - 实现自定义的流量控制机制
+
 ### 6. libevent 框架下的数据接收流程
 
 当使用 libevent 框架时，数据接收流程会有所不同：
