@@ -467,61 +467,61 @@ get_n_bytes_readable_on_socket(evutil_socket_t fd)
 
 1. 检查 UDP 统计信息：
 
-```bash
-# 查看 UDP 统计
-netstat -us
-cat /proc/net/udp
-cat /proc/net/snmp
-```
+    ```bash
+    # 查看 UDP 统计
+    netstat -us
+    cat /proc/net/udp
+    cat /proc/net/snmp
+    ```
 
 2. 使用 tcpdump 抓包分析：
 
-```bash
-# 抓取指定端口的 UDP 包
-tcpdump -i any udp port xxxxx -w dump.pcap
-```
+    ```bash
+    # 抓取指定端口的 UDP 包
+    tcpdump -i any udp port xxxxx -w dump.pcap
+    ```
 
 3. 检查系统参数：
 
-```bash
-# 查看接收缓冲区大小
-sysctl net.core.rmem_max
-sysctl net.core.rmem_default
+    ```bash
+    # 查看接收缓冲区大小
+    sysctl net.core.rmem_max
+    sysctl net.core.rmem_default
 
-# 查看 UDP 相关参数
-sysctl net.ipv4.udp_mem
-```
+    # 查看 UDP 相关参数
+    sysctl net.ipv4.udp_mem
+    ```
 
 4. 在代码中添加更多诊断信息：
 
-```c
-// 获取实际的接收缓冲区大小
-int rcvbuf;
-socklen_t optlen = sizeof(rcvbuf);
-getsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, &optlen);
-printf("Receive buffer size: %d\n", rcvbuf);
+    ```c
+    // 获取实际的接收缓冲区大小
+    int rcvbuf;
+    socklen_t optlen = sizeof(rcvbuf);
+    getsockopt(sockfd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, &optlen);
+    printf("Receive buffer size: %d\n", rcvbuf);
 
-// 获取真实的接收队列使用情况
-struct sk_meminfo meminfo;
-optlen = sizeof(meminfo);
-getsockopt(sockfd, SOL_SOCKET, SO_MEMINFO, &meminfo, &optlen);
-printf("Real receive queue usage: %d\n", meminfo[SK_MEMINFO_RMEM_ALLOC]);
+    // 获取真实的接收队列使用情况
+    struct sk_meminfo meminfo;
+    optlen = sizeof(meminfo);
+    getsockopt(sockfd, SOL_SOCKET, SO_MEMINFO, &meminfo, &optlen);
+    printf("Real receive queue usage: %d\n", meminfo[SK_MEMINFO_RMEM_ALLOC]);
 
-// 检查 socket 是否有待处理的错误
-int error = 0;
-optlen = sizeof(error);
-getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &optlen);
-if (error != 0) {
-    printf("Socket error: %s\n", strerror(error));
-}
-```
+    // 检查 socket 是否有待处理的错误
+    int error = 0;
+    optlen = sizeof(error);
+    getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &error, &optlen);
+    if (error != 0) {
+        printf("Socket error: %s\n", strerror(error));
+    }
+    ```
 
 5. 使用 strace 工具分析系统调用：
 
-```bash
-# 追踪系统调用
-strace -p <pid>
-```
+    ```bash
+    # 追踪系统调用
+    strace -p <pid>
+    ```
 
 ## 总结
 
