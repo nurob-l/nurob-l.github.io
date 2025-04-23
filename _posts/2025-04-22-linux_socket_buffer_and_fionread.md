@@ -1,11 +1,13 @@
 ---
 layout: post
-title: "Linux Socket 缓冲区机制与 FIONREAD/SO_MEMINFO 接口解析"
+title: "Linux Socket 缓冲区机制与 FIONREAD/SO_MEMINFO 接口浅度解析"
 date: 2025-04-22
 categories: [网络, Linux]
 ---
 
-# Linux Socket 缓冲区机制与 FIONREAD/SO_MEMINFO 接口解析
+# Linux Socket 缓冲区机制与 FIONREAD/SO_MEMINFO 接口浅度解析
+
+> 本文由 AI 生成，旨在深入解析 Linux Socket 缓冲区机制及相关接口的工作原理。文章内容基于 Linux 5.15 内核源码和 libevent 2.1.12 版本的分析。
 
 ## 问题背景
 
